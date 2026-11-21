@@ -56,6 +56,7 @@ function flattenIngredients(list, out = []) {
 
 function ingredientName(ing) {
   let t = (ing.text || '').replace(/_/g, '').trim();
+  if (t.length > 3 && t === t.toUpperCase()) t = t.toLowerCase(); // GROSSBUCHSTABEN (Allergene) normal schreiben
   if (!t && ing.id) t = ing.id.replace(/^[a-z]{2}:/, '').replace(/-/g, ' ');
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 }
@@ -73,11 +74,34 @@ function uniqueNames(ings) {
 
 /* ---------- Bewertung ---------- */
 
+// Eigene Zutatenliste (zutaten.js) ergänzt die Angaben der Datenbank
+function applyOwnList(ing) {
+  const [verdict, why] = window.ZutatenCheck ? ZutatenCheck.judge(ing.text || ing.id || '') : [null, null];
+  const i = { ...ing };
+  if (verdict === 'meat') { i.vegan = 'no'; i.vegetarian = 'no'; }
+  else if (verdict === 'animal') { i.vegan = 'no'; if (i.vegetarian !== 'no') i.vegetarian = 'yes'; }
+  else if (verdict === 'plant') { if (i.vegan !== 'no') i.vegan = 'yes'; if (i.vegetarian !== 'no') i.vegetarian = 'yes'; }
+  else if (verdict === 'maybe') { i.vegan = i.vegan || 'maybe'; i.vegetarian = i.vegetarian || 'maybe'; }
+  i.own = verdict;
+  i.why = why;
+  return i;
+}
+
 function classify(p) {
   const tags = p.ingredients_analysis_tags || [];
   const labels = p.labels_tags || [];
   const cats = p.categories_tags || [];
-  const ings = flattenIngredients(p.ingredients);
+  const text = p.ingredients_text_de || p.ingredients_text || '';
+
+  let ings = flattenIngredients(p.ingredients).map(applyOwnList);
+  const known = new Set(ings.map((i) => ingredientName(i).toLowerCase()));
+  // Zusätzlich den Zutatentext selbst durchsuchen (findet z. B. "Sahnepulver", wenn die Datenbank es nicht kennt)
+  const fromText = window.ZutatenCheck ? ZutatenCheck.splitIngredients(text).map((t) => applyOwnList({ text: t })) : [];
+  for (const i of fromText) {
+    const key = ingredientName(i).toLowerCase();
+    if (known.has(key)) continue;
+    if (i.own === 'meat' || i.own === 'animal' || !p.ingredients || !p.ingredients.length) { ings.push(i); known.add(key); }
+  }
 
   const nonVegetarian = uniqueNames(ings.filter((i) => i.vegetarian === 'no'));
   // Bei "vielleicht" nur die genaueste Zutat zeigen (z. B. "Lecithine" statt "Emulgator")
@@ -91,7 +115,7 @@ function classify(p) {
   const labelVegan = labels.includes('en:vegan');
   const labelVegetarian = labels.includes('en:vegetarian');
   const meatCategory = cats.some((c) => MEAT_CATEGORIES.includes(c));
-  const hasIngredients = ings.length > 0 || !!(p.ingredients_text || p.ingredients_text_de);
+  const hasIngredients = ings.length > 0 || !!text;
 
   const base = { nonVegetarian, nonVeganOnly, maybeVegan, maybeVegetarian, labelVegan, labelVegetarian };
 
@@ -103,17 +127,20 @@ function classify(p) {
     return { ...base, level: 'red', meatCategory };
   }
 
-  // GRÜN: laut Zutatenanalyse vegan
+  // GELB: tierische Zutaten gefunden, aber kein Fleisch/Fisch
+  if (nonVeganOnly.length || tags.includes('en:non-vegan')) return { ...base, level: 'yellow', veganUnclear: false };
+
+  // GRÜN: laut Datenbank vegan
   if (tags.includes('en:vegan')) return { ...base, level: 'green' };
 
-  // GELB: vegetarisch, aber nicht (sicher) vegan
-  if (labelVegetarian || tags.includes('en:vegetarian')) {
-    const surelyNotVegan = tags.includes('en:non-vegan') || nonVeganOnly.length > 0;
-    return { ...base, level: 'yellow', veganUnclear: !surelyNotVegan };
-  }
+  // Vegetarisch-Siegel, Vegan aber offen
+  if (labelVegetarian) return { ...base, level: 'yellow', veganUnclear: true };
 
+  // Keine Zutaten bekannt: ehrlich "unklar"
   if (!hasIngredients) return { ...base, level: 'grey', reason: 'noIngredients' };
-  return { ...base, level: 'grey', reason: 'unclear' };
+
+  // Zutaten bekannt, nichts Tierisches gefunden
+  return { ...base, level: 'green', byOwnList: true };
 }
 
 const LEVELS = {
@@ -133,6 +160,8 @@ function renderDetails(r, p) {
 
   if (r.level === 'green') {
     sub = r.labelVegan ? 'Trägt ein Vegan-Siegel.' : 'Laut Zutatenliste keine tierischen Zutaten.';
+    const check = [...new Set([...r.maybeVegan, ...r.maybeVegetarian])];
+    r.maybeVegan = check;
     if (!r.labelVegan && r.maybeVegan.length) {
       html += '<h3>Kurz prüfen</h3><p class="note">Diese Zutaten sind meist pflanzlich, können aber tierischen Ursprungs sein:</p>' + list(r.maybeVegan, 'warn');
     }
@@ -588,4 +617,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // Für Tests
-window.VeganCheck = { classify, rankCameras, validEan };
+window.VeganCheck = { classify, applyOwnList, rankCameras, validEan };

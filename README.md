@@ -40,6 +40,8 @@ https://petersinesi-star.github.io/vegan-check/
 
 ## Gut zu wissen
 
+- Zusätzlich zur Datenbank prüft die App die Zutaten selbst mit einer eigenen deutschen Liste (Datei `zutaten.js`): z. B. Sahnepulver, Molke, Butterreinfett, Ei, Honig, Gelatine, Fleisch, Fisch. Lecithine gelten als pflanzlich, außer Ei-Lecithin. Hinweise wie „Kann Spuren von Milch enthalten“ zählen nicht.
+
 - Die Produktdaten kommen von [Open Food Facts](https://de.openfoodfacts.org), einer freien Datenbank, die von Freiwilligen gepflegt wird. Fehlt ein Produkt, kannst du es dort selbst eintragen. Danach erkennt die App es für alle.
 - Die Angaben sind **ohne Gewähr**. Bei Allergien oder wenn es dir genau darauf ankommt, lies bitte immer die Zutatenliste auf der Packung.
 - Die App braucht Internet für die Produktsuche. Der Verlauf wird nur auf deinem Handy gespeichert.

@@ -1,7 +1,7 @@
 // Speichert die App selbst, damit sie auch bei schlechtem Empfang schnell startet.
-const CACHE = 'vegan-check-v2';
+const CACHE = 'vegan-check-v3';
 const FILES = [
-  './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
+  './', 'index.html', 'style.css', 'app.js', 'zutaten.js', 'manifest.webmanifest',
   'lib/html5-qrcode.min.js', 'icons/icon-192.png', 'icons/icon-512.png'
 ];
 
