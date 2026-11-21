@@ -22,7 +22,10 @@ const els = {
   sub: $('statusSub'), img: $('productImg'), name: $('productName'), meta: $('productMeta'),
   details: $('details'), nextBtn: $('nextBtn'), manualForm: $('manualForm'), manualInput: $('manualInput'),
   history: $('history'), historySection: $('historySection'), clearHistory: $('clearHistory'),
-  shareBtn: $('shareBtn'), toast: $('toast')
+  shareBtn: $('shareBtn'), toast: $('toast'),
+  cam: $('cam'), video: $('video'), switchCam: $('switchCam'), zoom: $('zoom'), zoomWrap: $('zoomWrap'),
+  torchBtn: $('torchBtn'), camLabel: $('camLabel'),
+  flash: $('flash'), flashIcon: $('flashIcon'), flashTitle: $('flashTitle'), flashSub: $('flashSub')
 };
 
 let scanner = null;
@@ -195,13 +198,75 @@ function setProduct(p, code) {
   return name;
 }
 
-async function lookup(code) {
+/* ---------- Deutliche Rückmeldung: Vollbild, Ton, Vibration ---------- */
+
+let audioCtx = null;
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* kein Ton möglich */ }
+}
+
+function beep(notes) {
+  if (!audioCtx) return;
+  let t = audioCtx.currentTime;
+  for (const [freq, dur] of notes) {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+    t += dur + 0.05;
+  }
+}
+
+const SOUNDS = {
+  detected: [[1400, 0.09]],
+  green: [[880, 0.12], [1320, 0.2]],
+  yellow: [[700, 0.15], [700, 0.15]],
+  red: [[330, 0.22], [250, 0.3]],
+  grey: [[500, 0.2]]
+};
+const VIBES = { detected: 80, green: [120], yellow: [120, 80, 120], red: [300, 100, 300], grey: [60] };
+
+function feedback(kind) {
+  beep(SOUNDS[kind] || SOUNDS.grey);
+  if (navigator.vibrate) navigator.vibrate(VIBES[kind] || 60);
+}
+
+let flashTimer = null;
+function showFlash(level, icon, title, sub, autoHideMs) {
+  clearTimeout(flashTimer);
+  els.flash.className = 'flash ' + level;
+  els.flashIcon.textContent = icon;
+  els.flashTitle.textContent = title;
+  els.flashSub.textContent = sub || '';
+  els.flash.hidden = false;
+  if (autoHideMs) flashTimer = setTimeout(hideFlash, autoHideMs);
+}
+function hideFlash() {
+  clearTimeout(flashTimer);
+  els.flash.hidden = true;
+}
+
+/* ---------- Produkt nachschlagen ---------- */
+
+async function lookup(code, fromScan = false) {
   code = String(code).replace(/\D/g, '');
   if (code.length < 8) { toast('Bitte eine gültige Barcode-Nummer eingeben.'); return; }
   if (busy) return;
   busy = true;
-  await pauseScanner();
+  unlockAudio();
+  await stopCamera();
 
+  if (fromScan) feedback('detected');
+  showFlash('loading', '✓', 'Barcode erkannt', 'EAN ' + code + ' wird geprüft…');
   showResultCard('loading', 'Suche…', 'Produkt wird nachgeschlagen.');
   setProduct(null, code);
   els.name.textContent = '';
@@ -221,12 +286,15 @@ async function lookup(code) {
     const name = setProduct(p, code);
     showResultCard(r.level, LEVELS[r.level].title, sub);
     els.details.innerHTML = html;
-    if (navigator.vibrate) navigator.vibrate(r.level === 'green' ? 60 : [60, 80, 60]);
+    feedback(r.level);
+    showFlash(r.level, LEVELS[r.level].icon, LEVELS[r.level].title.toUpperCase(), name, 1800);
     addHistory({ code, name, level: r.level });
   } catch (err) {
     console.error(err);
     showResultCard('grey', 'Keine Verbindung', 'Das Produkt konnte gerade nicht geladen werden. Bist du online?');
     els.details.innerHTML = '<p class="note">Im Supermarkt ist der Empfang manchmal schlecht. Einfach nochmal versuchen.</p>';
+    feedback('grey');
+    showFlash('grey', '!', 'Keine Verbindung', 'Bitte nochmal versuchen.', 1800);
   } finally {
     busy = false;
   }
@@ -236,56 +304,213 @@ function notFound(code) {
   setProduct(null, code);
   showResultCard('grey', 'Nicht gefunden', 'Dieses Produkt ist noch nicht in der Datenbank.');
   els.details.innerHTML = `<p class="note">Bitte die Zutatenliste auf der Packung lesen. Wenn du magst, kannst du das Produkt bei <a href="https://de.openfoodfacts.org/produkt/${esc(code)}" target="_blank" rel="noopener">Open Food Facts</a> eintragen, dann kennen es alle.</p>`;
+  feedback('grey');
+  showFlash('grey', '?', 'Nicht gefunden', 'Produkt ist nicht in der Datenbank.', 1800);
   addHistory({ code, name: 'Unbekanntes Produkt', level: 'grey' });
 }
 
 /* ---------- Kamera ---------- */
 
+// Prüfziffer von EAN-8/EAN-13/UPC-A: verhindert Fehl-Erkennungen
+function validEan(code) {
+  if (!/^\d+$/.test(code) || ![8, 12, 13].includes(code.length)) return code.length === 6 || code.length === 7; // UPC-E durchlassen
+  const digits = code.split('').map(Number);
+  const check = digits.pop();
+  let sum = 0;
+  digits.reverse().forEach((d, i) => { sum += d * (i % 2 === 0 ? 3 : 1); });
+  return (10 - (sum % 10)) % 10 === check;
+}
+
+const CAM_KEY = 'veganCheckCamera';
+let stream = null;
+let detector = null;
+let detectLoop = null;
+let backCams = [];
+let camIndex = 0;
+let lastCode = '';
+let sameCount = 0;
+
+async function nativeDetector() {
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const wanted = ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter((f) => supported.includes(f));
+    return wanted.length ? new BarcodeDetector({ formats: wanted }) : null;
+  } catch (e) { return null; }
+}
+
+// Rückkameras sortieren: Hauptkamera zuerst, Weitwinkel/Tele/Makro nach hinten
+function rankCameras(devices) {
+  const vids = devices.filter((d) => d.kind === 'videoinput');
+  let back = vids.filter((d) => /back|rear|rück|environment|hinten|außen/i.test(d.label));
+  if (!back.length) back = vids.filter((d) => !/front|user|vorder|selfie/i.test(d.label));
+  if (!back.length) back = vids;
+  const penalty = (l) => (/ultra|wide|weitwinkel|0[.,]5/i.test(l) ? 20 : 0) + (/tele|zoom/i.test(l) ? 10 : 0) + (/macro|makro|depth|tiefe|ir\b/i.test(l) ? 30 : 0);
+  const num = (l) => { const m = l.match(/(\d+)\s*,/) || l.match(/(\d+)(?!.*\d)/); return m ? Number(m[1]) : 99; };
+  return back.slice().sort((a, b) => (penalty(a.label) - penalty(b.label)) || (num(a.label) - num(b.label)));
+}
+
+function videoConstraints(deviceId) {
+  const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+  return deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } };
+}
+
+async function openStream(deviceId) {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(deviceId), audio: false });
+  els.video.srcObject = stream;
+  await els.video.play().catch(() => {});
+  await tuneTrack();
+}
+
+async function tuneTrack() {
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track) return;
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  const adv = {};
+  if (caps.focusMode && caps.focusMode.includes('continuous')) adv.focusMode = 'continuous';
+  if (caps.exposureMode && caps.exposureMode.includes('continuous')) adv.exposureMode = 'continuous';
+  if (Object.keys(adv).length) { try { await track.applyConstraints({ advanced: [adv] }); } catch (e) { /* egal */ } }
+
+  // Zoom-Regler (bei manchen Handys wechselt das auch auf die Hauptlinse)
+  if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+    els.zoom.min = caps.zoom.min;
+    els.zoom.max = Math.min(caps.zoom.max, 5);
+    els.zoom.step = caps.zoom.step || 0.1;
+    const start = Math.min(Math.max(1.5, caps.zoom.min), els.zoom.max);
+    els.zoom.value = start;
+    try { await track.applyConstraints({ advanced: [{ zoom: start }] }); } catch (e) { /* egal */ }
+    els.zoomWrap.hidden = false;
+  } else {
+    els.zoomWrap.hidden = true;
+  }
+  els.torchBtn.hidden = !caps.torch;
+  els.torchBtn.classList.remove('on');
+
+  const s = track.getSettings ? track.getSettings() : {};
+  els.camLabel.textContent = backCams.length > 1 ? `Kamera ${camIndex + 1}/${backCams.length}` : '';
+  if (s.width) els.camLabel.textContent = [els.camLabel.textContent, `${s.width}×${s.height}`].filter(Boolean).join(' · ');
+}
+
 async function startScanner() {
-  if (!window.Html5Qrcode) { toast('Scanner konnte nicht geladen werden.'); return; }
-  if (!scanner) {
-    const F = window.Html5QrcodeSupportedFormats;
-    scanner = new Html5Qrcode('reader', {
-      formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E],
-      useBarCodeDetectorIfSupported: true,
-      verbose: false
-    });
+  unlockAudio();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    els.hint.textContent = 'Dieser Browser erlaubt keinen Kamerazugriff. Tippe die Nummer unter dem Barcode ein.';
+    return;
   }
   els.startBtn.disabled = true;
   els.startBtn.textContent = 'Kamera wird gestartet…';
   try {
+    detector = detector || await nativeDetector();
+    if (!detector) return startFallbackScanner();
+
+    // Erst irgendeine Rückkamera öffnen, dann sind die Kameranamen lesbar
+    await openStream(null);
+    backCams = rankCameras(await navigator.mediaDevices.enumerateDevices());
+    let saved = null;
+    try { saved = localStorage.getItem(CAM_KEY); } catch (e) { /* egal */ }
+    const savedIdx = backCams.findIndex((d) => d.deviceId === saved);
+    camIndex = savedIdx >= 0 ? savedIdx : 0;
+    const current = stream.getVideoTracks()[0].getSettings().deviceId;
+    if (backCams[camIndex] && backCams[camIndex].deviceId !== current) await openStream(backCams[camIndex].deviceId);
+    else await tuneTrack();
+
+    els.switchCam.hidden = backCams.length < 2;
+    els.cam.hidden = false;
+    els.startBtn.hidden = true;
+    els.hint.textContent = 'Barcode in den weißen Rahmen halten, etwa 15–20 cm Abstand. Unscharf? Zoom-Regler oder „Kamera“ antippen.';
+    scanning = true;
+    runDetection();
+  } catch (err) {
+    console.error(err);
+    cameraFailed();
+  }
+}
+
+function runDetection() {
+  clearTimeout(detectLoop);
+  const tick = async () => {
+    if (!scanning) return;
+    if (els.video.readyState >= 2) {
+      try {
+        const codes = await detector.detect(els.video);
+        const hit = codes.map((c) => c.rawValue).find(validEan);
+        if (hit) {
+          // Zweimal hintereinander derselbe Code = sicher erkannt (bei gültiger Prüfziffer reicht einmal)
+          sameCount = hit === lastCode ? sameCount + 1 : 1;
+          lastCode = hit;
+          if (hit.length >= 8 || sameCount >= 2) { lastCode = ''; sameCount = 0; lookup(hit, true); return; }
+        }
+      } catch (e) { /* nächster Versuch */ }
+    }
+    detectLoop = setTimeout(tick, 80);
+  };
+  tick();
+}
+
+async function switchCamera() {
+  if (backCams.length < 2) return;
+  camIndex = (camIndex + 1) % backCams.length;
+  try { localStorage.setItem(CAM_KEY, backCams[camIndex].deviceId); } catch (e) { /* egal */ }
+  try { await openStream(backCams[camIndex].deviceId); } catch (e) { toast('Diese Kamera lässt sich nicht öffnen.'); }
+  toast(`Kamera ${camIndex + 1} von ${backCams.length}`, 1200);
+}
+
+async function toggleTorch() {
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track) return;
+  const on = !els.torchBtn.classList.contains('on');
+  try { await track.applyConstraints({ advanced: [{ torch: on }] }); els.torchBtn.classList.toggle('on', on); } catch (e) { /* egal */ }
+}
+
+async function setZoom() {
+  const track = stream && stream.getVideoTracks()[0];
+  if (track) { try { await track.applyConstraints({ advanced: [{ zoom: Number(els.zoom.value) }] }); } catch (e) { /* egal */ } }
+}
+
+// Ersatz für Browser ohne eingebauten Barcode-Scanner (z. B. iPhone)
+async function startFallbackScanner() {
+  if (!window.Html5Qrcode) { cameraFailed(); return; }
+  if (!scanner) {
+    const F = window.Html5QrcodeSupportedFormats;
+    scanner = new Html5Qrcode('reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], verbose: false });
+  }
+  try {
     await scanner.start(
       { facingMode: 'environment' },
       {
-        fps: 12,
-        qrbox: (w, h) => {
-          const width = Math.floor(Math.min(w * 0.85, 360));
-          return { width, height: Math.floor(Math.min(width * 0.5, h * 0.6)) };
-        },
-        aspectRatio: 1.333
+        fps: 15,
+        qrbox: (w, h) => { const width = Math.floor(Math.min(w * 0.85, 360)); return { width, height: Math.floor(Math.min(width * 0.5, h * 0.6)) }; },
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] }
       },
-      (text) => lookup(text),
+      (text) => { if (validEan(text)) lookup(text, true); },
       () => {}
     );
     scanning = true;
     els.startBtn.hidden = true;
-    els.hint.textContent = 'Halte den Barcode in den Rahmen. Es geht automatisch los.';
+    els.hint.textContent = 'Barcode in den Rahmen halten, etwa 15–20 cm Abstand.';
   } catch (err) {
     console.error(err);
-    els.startBtn.disabled = false;
-    els.startBtn.textContent = '📷 Scannen starten';
-    els.hint.textContent = 'Kein Kamerazugriff. Bitte erlaube die Kamera in den Browser-Einstellungen oder tippe die Nummer unter dem Barcode ein.';
+    cameraFailed();
   }
 }
 
-async function pauseScanner() {
-  if (scanner && scanning) {
-    try { await scanner.stop(); } catch (e) { /* schon gestoppt */ }
-    scanning = false;
-  }
+function cameraFailed() {
+  els.startBtn.disabled = false;
+  els.startBtn.textContent = '📷 Scannen starten';
+  els.hint.textContent = 'Kein Kamerazugriff. Bitte erlaube die Kamera in den Browser-Einstellungen oder tippe die Nummer unter dem Barcode ein.';
+}
+
+async function stopCamera() {
+  scanning = false;
+  clearTimeout(detectLoop);
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  els.cam.hidden = true;
+  if (scanner && scanner.isScanning) { try { await scanner.stop(); } catch (e) { /* schon gestoppt */ } }
 }
 
 function backToScan() {
+  hideFlash();
   els.result.hidden = true;
   els.scanArea.hidden = false;
   els.manualInput.value = '';
@@ -348,6 +573,10 @@ els.clearHistory.addEventListener('click', () => {
   renderHistory();
 });
 els.shareBtn.addEventListener('click', share);
+els.switchCam.addEventListener('click', switchCamera);
+els.torchBtn.addEventListener('click', toggleTorch);
+els.zoom.addEventListener('input', setZoom);
+els.flash.addEventListener('click', hideFlash);
 renderHistory();
 
 // Barcode direkt per Link öffnen, z. B. ...?ean=4000417025005
@@ -359,4 +588,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // Für Tests
-window.VeganCheck = { classify };
+window.VeganCheck = { classify, rankCameras, validEan };

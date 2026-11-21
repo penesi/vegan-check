@@ -22,6 +22,9 @@ Läuft direkt im Browser auf iPhone und Android. Du musst nichts aus dem App Sto
 3. Den Barcode der Verpackung in den Rahmen halten. Das Ergebnis erscheint automatisch.
 4. Mit **„Nächstes Produkt scannen“** geht es weiter.
 
+Wird der Barcode schlecht erkannt? Mit **„🔄 Kamera“** zur nächsten Handykamera wechseln (die App merkt sich die Wahl), mit dem **🔍 Regler** heranzoomen oder mit **💡 Licht** die Taschenlampe einschalten.
+Sobald ein Produkt erkannt ist, piept und vibriert das Handy, und das Ergebnis erscheint groß in Grün, Gelb, Rot oder Grau.
+
 Kamera geht nicht? Dann einfach die Zahlen unter dem Barcode eintippen und auf **„Prüfen“** tippen.
 Die zuletzt gescannten Produkte stehen unten in der Liste und lassen sich erneut öffnen.
 
