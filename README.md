@@ -2,7 +2,7 @@
 
 **Barcode scannen und sofort sehen, ob ein Produkt vegan, vegetarisch oder mit Fleisch ist.**
 
-👉 **App öffnen:** https://petersinesi-star.github.io/vegan-check/
+👉 **App öffnen:** https://penesi.github.io/vegan-check/
 
 Läuft direkt im Browser auf iPhone und Android. Du musst nichts aus dem App Store laden und dich nirgends anmelden.
 
@@ -36,7 +36,7 @@ Die zuletzt gescannten Produkte stehen unten in der Liste und lassen sich erneut
 ## Weiterschicken
 
 Oben rechts auf **„Teilen“** tippen und den Link per WhatsApp, Mail usw. verschicken. Oder einfach diesen Link kopieren:
-https://petersinesi-star.github.io/vegan-check/
+https://penesi.github.io/vegan-check/
 
 ## Gut zu wissen
 
