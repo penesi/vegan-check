@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Vegan-Check</title>
+  <meta name="description" content="Barcode scannen und sofort sehen: vegan, vegetarisch oder mit Fleisch.">
+  <meta name="theme-color" content="#1f7a4d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Vegan-Check">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>🌱 Vegan-Check</h1>
+    <button id="shareBtn" class="ghost" type="button">Teilen</button>
+  </header>
+
+  <main>
+    <section id="scanArea">
+      <div id="reader"></div>
+      <div id="cameraHint" class="hint">Tippe auf „Scannen starten“ und halte den Barcode der Verpackung in den Rahmen.</div>
+      <button id="startBtn" class="primary" type="button">📷 Scannen starten</button>
+      <form id="manualForm" class="manual">
+        <input id="manualInput" inputmode="numeric" pattern="[0-9]*" placeholder="oder Barcode-Nummer eintippen" autocomplete="off">
+        <button type="submit" class="secondary">Prüfen</button>
+      </form>
+    </section>
+
+    <section id="result" hidden>
+      <div id="resultCard" class="card">
+        <div class="status">
+          <span id="statusIcon" class="status-icon"></span>
+          <div>
+            <div id="statusTitle" class="status-title"></div>
+            <div id="statusSub" class="status-sub"></div>
+          </div>
+        </div>
+        <div class="product">
+          <img id="productImg" alt="" hidden>
+          <div>
+            <div id="productName" class="product-name"></div>
+            <div id="productMeta" class="product-meta"></div>
+          </div>
+        </div>
+        <div id="details"></div>
+      </div>
+      <button id="nextBtn" class="primary" type="button">📷 Nächstes Produkt scannen</button>
+    </section>
+
+    <section id="historySection" hidden>
+      <div class="history-head">
+        <h2>Zuletzt gescannt</h2>
+        <button id="clearHistory" class="ghost small" type="button">Löschen</button>
+      </div>
+      <ul id="history"></ul>
+    </section>
+
+    <footer>
+      <p>Die Daten stammen von <a href="https://de.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, einer freien Datenbank, die von Freiwilligen gepflegt wird. Angaben ohne Gewähr: Im Zweifel bitte die Zutatenliste auf der Packung lesen.</p>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="lib/html5-qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
